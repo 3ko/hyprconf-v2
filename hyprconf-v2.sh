@@ -34,6 +34,10 @@ log="$log_dir/hyprconf-v2.log"
 mkdir -p "$log_dir"
 touch "$log"
 
+# ========= Paths ========= #
+config_root="$dir/config"
+extras_root="$dir/extras"
+
 # ========= Messages ========= #
 msg() {
     local actn=$1
@@ -226,8 +230,17 @@ sleep 2 && clear
 
 # ========= Directories & variables ========= #
 hypr_dir="$HOME/.config/hypr"
+waybar_dir="$HOME/.config/waybar"
+rofi_dir="$HOME/.config/rofi"
+wlogout_dir="$HOME/.config/wlogout"
+swaync_dir="$HOME/.config/swaync"
+kitty_dir="$HOME/.config/kitty"
 scripts_dir="$hypr_dir/scripts"
 fonts_dir="$HOME/.local/share/fonts"
+hypr_source="$config_root/hypr"
+waybar_source="$config_root/waybar"
+rofi_source="$config_root/rofi"
+wlogout_source="$config_root/wlogout"
 
 msg act "Now setting up the pre installed Hyprland configuration..."
 sleep 1
@@ -259,7 +272,7 @@ dirs=(
     yazi
     dolphinrc
     kwalletmanagerrc
-    kwallertc
+    kwalletrc
 )
 
 # ========= Backup configs ========= #
@@ -288,17 +301,26 @@ sleep 1
 if hostnamectl | grep -q 'Chassis: vm'; then
     msg att "Vous utilisez ce script dans une machine virtuelle..."
     msg act "Adaptation de la configuration pour VM..."
-    sed -i '/env = WLR_NO_HARDWARE_CURSORS,1/s/^#//' "$dir/config/hypr/confs/env.conf"
-    sed -i '/env = WLR_RENDERER_ALLOW_SOFTWARE,1/s/^#//' "$dir/config/hypr/confs/env.conf"
-    mv "$dir/config/hypr/confs/monitor.conf" "$dir/config/hypr/confs/monitor-back.conf"
-    cp "$dir/config/hypr/confs/monitor-vbox.conf" "$dir/config/hypr/confs/monitor.conf"
+    sed -i '/env = WLR_NO_HARDWARE_CURSORS,1/s/^#//' "$hypr_source/confs/env.conf"
+    sed -i '/env = WLR_RENDERER_ALLOW_SOFTWARE,1/s/^#//' "$hypr_source/confs/env.conf"
+    mv "$hypr_source/confs/monitor.conf" "$hypr_source/confs/monitor-back.conf"
+    cp "$hypr_source/confs/monitor-vbox.conf" "$hypr_source/confs/monitor.conf"
 fi
 
 sleep 1
 
 # ========= Copie des configs ========= #
-mkdir -p "$HOME/.config"
-cp -r "$dir/config"/* "$HOME/.config/" && sleep 0.5
+msg act "Copie des configurations principales..."
+for confs in "${dirs[@]}"; do
+    src_path="$config_root/$confs"
+    if [[ ! -e "$src_path" ]]; then
+        msg skp "Configuration $confs absente dans le dépôt, ignorée."
+        continue
+    fi
+    cp -r "$src_path" "$HOME/.config/"
+done
+
+sleep 0.5
 
 if [[ ! -d "$HOME/.local/share/fastfetch" ]] && [[ -d "$HOME/.config/fastfetch" ]]; then
     mv "$HOME/.config/fastfetch" "$HOME/.local/share/"
@@ -320,7 +342,7 @@ fi
 # ========= Fonts ========= #
 msg act "Installation des fonts..."
 mkdir -p "$fonts_dir"
-cp -r "$dir/extras/fonts" "$fonts_dir"
+cp -r "$extras_root/fonts/." "$fonts_dir"
 msg act "Mise à jour du cache de fonts..."
 fc-cache -fv 2>&1 | tee -a "$log" >/dev/null
 
@@ -329,9 +351,9 @@ if [[ -f "$HOME/.local/state/dolphinstaterc" ]]; then
     mv "$HOME/.local/state/dolphinstaterc" "$HOME/.local/state/dolphinstaterc.back"
 fi
 
-if [[ -f "$dir/extras/dolphinstaterc" ]]; then
+if [[ -f "$extras_root/dolphinstaterc" ]]; then
     mkdir -p "$HOME/.local/state"
-    cp "$dir/extras/dolphinstaterc" "$HOME/.local/state/"
+    cp "$extras_root/dolphinstaterc" "$HOME/.local/state/"
 fi
 
 # ========= Session Wayland ========= #
@@ -343,69 +365,71 @@ else
     sudo mkdir -p "$wayland_session_dir" 2>&1 | tee -a "$log"
 fi
 
-sudo cp "$dir/extras/hyprland.desktop" "$wayland_session_dir/" 2>&1 | tee -a "$log"
+sudo cp "$extras_root/hyprland.desktop" "$wayland_session_dir/" 2>&1 | tee -a "$log"
 
 # ========= Thèmes & liens ========= #
+default_theme="Catppuccin"
+
 # waybar
-ln -sf "$HOME/.config/waybar/configs/full-top" "$HOME/.config/waybar/config"
-ln -sf "$HOME/.config/waybar/style/full-top.css" "$HOME/.config/waybar/style.css"
+ln -sf "$waybar_dir/configs/full-top" "$waybar_dir/config"
+ln -sf "$waybar_dir/style/full-top.css" "$waybar_dir/style.css"
 
 # thème courant
-themeFile="$HOME/.config/hypr/.cache/.theme"
+themeFile="$hypr_dir/.cache/.theme"
 mkdir -p "$(dirname "$themeFile")"
-echo "Catppuccin" > "$themeFile"
+echo "$default_theme" > "$themeFile"
 
 # scripts de wallpaper & refresh
-if [[ -x "$HOME/.config/hypr/scripts/Wallpaper.sh" ]]; then
-    "$HOME/.config/hypr/scripts/Wallpaper.sh" &>/dev/null
+if [[ -x "$scripts_dir/Wallpaper.sh" ]]; then
+    "$scripts_dir/Wallpaper.sh" &>/dev/null
 fi
 
-hyprTheme="$HOME/.config/hypr/confs/themes/Catppuccin.conf"
-ln -sf "$hyprTheme" "$HOME/.config/hypr/confs/decoration.conf"
+hyprTheme="$hypr_dir/confs/themes/${default_theme}.conf"
+ln -sf "$hyprTheme" "$hypr_dir/confs/decoration.conf"
 
 # rofi
-rofiTheme="$HOME/.config/rofi/colors/Catppuccin.rasi"
-ln -sf "$rofiTheme" "$HOME/.config/rofi/themes/rofi-colors.rasi"
+rofiTheme="$rofi_dir/colors/${default_theme}.rasi"
+ln -sf "$rofiTheme" "$rofi_dir/themes/rofi-colors.rasi"
 
 # kitty
-kittyTheme="$HOME/.config/kitty/colors/Catppuccin.conf"
-ln -sf "$kittyTheme" "$HOME/.config/kitty/theme.conf"
+kittyTheme="$kitty_dir/colors/${default_theme}.conf"
+ln -sf "$kittyTheme" "$kitty_dir/theme.conf"
 
 # reload kitty si lancé
 pkill -USR1 kitty 2>/dev/null || true
 
 # waybar theme couleur
-waybarTheme="$HOME/.config/waybar/colors/Catppuccin.css"
-ln -sf "$waybarTheme" "$HOME/.config/waybar/style/theme.css"
+waybarTheme="$waybar_dir/colors/${default_theme}.css"
+ln -sf "$waybarTheme" "$waybar_dir/style/theme.css"
 
 # wlogout
-wlogoutTheme="$HOME/.config/wlogout/colors/Catppuccin.css"
-ln -sf "$wlogoutTheme" "$HOME/.config/wlogout/colors.css"
+wlogoutTheme="$wlogout_dir/colors/${default_theme}.css"
+ln -sf "$wlogoutTheme" "$wlogout_dir/colors.css"
 
 # swaync
-swayncTheme="$HOME/.config/swaync/colors/Catppuccin.css"
-ln -sf "$swayncTheme" "$HOME/.config/swaync/colors.css"
+swayncTheme="$swaync_dir/colors/${default_theme}.css"
+ln -sf "$swayncTheme" "$swaync_dir/colors.css"
 
 # VS Code
 settingsFile="$HOME/.config/Code/User/settings.json"
 if [[ -f "$settingsFile" ]]; then
-    sed -i 's|"workbench.colorTheme": ".*"|"workbench.colorTheme": "Catppuccin Mocha"|' "$settingsFile"
+    sed -i "s|\"workbench.colorTheme\": \".*\"|\"workbench.colorTheme\": \"${default_theme} Mocha\"|" "$settingsFile"
 fi
 
 # Kvantum / icons
-crudini --set "$HOME/.config/Kvantum/kvantum.kvconfig" General theme "Catppuccin" || true
+crudini --set "$HOME/.config/Kvantum/kvantum.kvconfig" General theme "$default_theme" || true
 crudini --set "$HOME/.config/kdeglobals" Icons Theme "Tela-circle-dracula" || true
 
 # cache & refresh Hypr
-if [[ -x "$HOME/.config/hypr/scripts/wallcache.sh" ]]; then
-    "$HOME/.config/hypr/scripts/wallcache.sh" &>/dev/null
+if [[ -x "$scripts_dir/wallcache.sh" ]]; then
+    "$scripts_dir/wallcache.sh" &>/dev/null
 fi
-if [[ -x "$HOME/.config/hypr/scripts/Refresh.sh" ]]; then
-    "$HOME/.config/hypr/scripts/Refresh.sh" &>/dev/null
+if [[ -x "$scripts_dir/Refresh.sh" ]]; then
+    "$scripts_dir/Refresh.sh" &>/dev/null
 fi
 
 # lockscreen
-ln -sf "$HOME/.config/hypr/lockscreens/hyprlock-1.conf" "$HOME/.config/hypr/hyprlock.conf"
+ln -sf "$hypr_dir/lockscreens/hyprlock-1.conf" "$hypr_dir/hyprlock.conf"
 
 msg dn "Script execution was successful! Now logout and log back in and enjoy your hyprland..."
 # === ___ Script Ends Here ___ === #

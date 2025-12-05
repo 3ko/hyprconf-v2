@@ -140,6 +140,14 @@ This Hyprland configuration version is not for Dynamic Color Changing. It's a Th
 > You will fine <i>configs</i> dir holding all the configurations.
 > A <i>style</i> dir holding all the <b>css</b> files.
 > A <i>moduled</i> dir for all the modules.
+
+## Configuration layout
+
+- `config/hypr/` — main Hyprland entrypoint (`hyprland.conf`) with all partials in `confs/`, scripts in `scripts/`, wallpapers per theme under `Wallpapers/` and lock screens in `lockscreens/`.
+- `config/waybar/` — active bar preset in `configs/full-top`, paired with the default stylesheet `style/full-top.css` and color themes in `colors/`.
+- `config/rofi/` — shared colors in `colors/Catppuccin.rasi`, menus in `menu/` and final entrypoint `themes/rofi-colors.rasi` used by the installer.
+- `config/wlogout/` — layouts under `layout/` and `layout_2/` with matching palettes in `colors/`.
+- `extras/` — complementary assets only: `fonts/` (installed to `~/.local/share/fonts`), `hyprland.desktop` (Wayland session file) and the optional `dolphinstaterc` state file.
 >
 > ### Fastfetch
 >
@@ -173,6 +181,8 @@ This Hyprland configuration version is not for Dynamic Color Changing. It's a Th
   chmod +x hyprconf-v2.sh
   ./hyprconf-v2.sh
 ```
+
+The installer copies the curated configs into `~/.config` (Hyprland, Waybar, Rofi, Wlogout and other desktop apps), updates the Waybar/Rofi/Wlogout symlinks to the default theme, installs fonts to `~/.local/share/fonts`, and places Fastfetch presets in `~/.local/share/fastfetch`.
 
 <br>
 
