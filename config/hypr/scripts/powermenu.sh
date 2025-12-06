@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Current Theme
-main_dir="$HOME/.config/rofi"
-dir="$main_dir/power_option"
-theme='small'
+# Environment: POWERMENU_THEME_NAME, ROFI_POWER_DIR, ROFI_BASE_DIR (from theme.conf)
+# Dependencies: rofi, systemctl, hyprctl, hyprlock/swaylock, awk
 
-# CMDs
-uptime="$(awk '{printf "%d hour, %d minutes\n", $1/3600, ($1%3600)/60}' /proc/uptime)"
-host=$(hostname)
+source "$HOME/.config/hypr/scripts/theme.sh"
+ensure_config_loaded || exit 1
+require_commands rofi awk hostname || exit 1
 
-# Options
+POWERMENU_THEME_FILE="$ROFI_POWER_DIR/${POWERMENU_THEME_NAME}.rasi"
+ROFI_CONFIRM_THEME="$ROFI_BASE_DIR/rofi-confirm.rasi"
+
+if [[ ! -f "$POWERMENU_THEME_FILE" ]]; then
+    log_error "Missing power menu theme: $POWERMENU_THEME_FILE"
+    exit 1
+fi
+
+uptime_string="$(awk '{printf "%d hour, %d minutes\n", $1/3600, ($1%3600)/60}' /proc/uptime)"
+
 shutdown=''
 reboot=''
 lock=''
@@ -18,61 +26,70 @@ logout=''
 yes=''
 no=''
 
-# Rofi CMD
 rofi_cmd() {
     rofi -dmenu \
         -p "Goodbye ${USER}" \
-        -mesg "Uptime: $uptime" \
-        -theme ${dir}/${theme}.rasi
+        -mesg "Uptime: $uptime_string" \
+        -theme "$POWERMENU_THEME_FILE"
 }
 
-# Confirmation CMD
 confirm_cmd() {
     rofi -dmenu \
         -p 'Confirmation' \
         -mesg 'Are you Sure?' \
-        -theme ${main_dir}/rofi-confirm.rasi
+        -theme "$ROFI_CONFIRM_THEME"
 }
 
-# Ask for confirmation
 confirm_exit() {
     echo -e "$yes\n$no" | confirm_cmd
 }
 
-# Pass variables to rofi dmenu
 run_rofi() {
     echo -e "$lock\n$suspend\n$logout\n$reboot\n$shutdown" | rofi_cmd
 }
 
-# Execute Command
 run_cmd() {
+    local selected
     selected="$(confirm_exit)"
-    if [[ "$selected" == "$yes" ]]; then
-        if [[ $1 == '--shutdown' ]]; then
+    [[ "$selected" != "$yes" ]] && exit 0
+
+    case "$1" in
+        --shutdown)
             "$HOME/.config/hypr/scripts/uptime.sh"
             "$HOME/.config/hypr/scripts/notification.sh" logout
+            require_commands systemctl || exit 1
             systemctl poweroff --now
-        elif [[ $1 == '--reboot' ]]; then
+            ;;
+        --reboot)
             "$HOME/.config/hypr/scripts/uptime.sh"
             "$HOME/.config/hypr/scripts/notification.sh" logout
+            require_commands systemctl || exit 1
             systemctl reboot --now
-        elif [[ $1 == '--lock' ]]; then
-            hyprlock
-        elif [[ $1 == '--logout' ]]; then
+            ;;
+        --lock)
+            if command -v hyprlock >/dev/null 2>&1; then
+                hyprlock
+            elif command -v swaylock >/dev/null 2>&1; then
+                swaylock
+            else
+                log_error "No lock command found (hyprlock or swaylock)"
+            fi
+            ;;
+        --logout)
             "$HOME/.config/hypr/scripts/uptime.sh"
             "$HOME/.config/hypr/scripts/notification.sh" logout
+            require_commands hyprctl || exit 1
             hyprctl dispatch exit 0
-        elif [[ $1 == '--suspend' ]]; then
+            ;;
+        --suspend)
             "$HOME/.config/hypr/scripts/uptime.sh"
             "$HOME/.config/hypr/scripts/notification.sh" logout
+            require_commands systemctl || exit 1
             systemctl suspend
-        fi
-    else
-        exit 0
-    fi
+            ;;
+    esac
 }
 
-# Actions
 chosen="$(run_rofi)"
 case ${chosen} in
     $shutdown)
@@ -82,13 +99,7 @@ case ${chosen} in
         run_cmd --reboot
         ;;
     $lock)
-        if [[ -x '/usr/bin/betterlockscreen' ]]; then
-            betterlockscreen -l
-        elif [[ -x '/usr/bin/hyprlock' ]]; then
-            run_cmd --lock
-        elif [[ -x '/usr/bin/swaylock' ]]; then
-            swaylock
-        fi
+        run_cmd --lock
         ;;
     $suspend)
         run_cmd --suspend

@@ -1,23 +1,28 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# rofi them
-theme="$HOME/.config/rofi/themes/rofi-powertheme.rasi"
+# Environment: ROFI_THEME_DIR, POWERMENU_THEME_NAME (from theme.conf)
+# Dependencies: rofi, notify-send
 
-# # Path to the script where the selected theme is saved
-menu_select_script="$HOME/.config/hypr/scripts/powermenu.sh"
+source "$HOME/.config/hypr/scripts/theme.sh"
+ensure_config_loaded || exit 1
+require_commands rofi notify-send || exit 1
 
-# Function to display the prompt
+power_theme_config="$ROFI_THEME_DIR/rofi-powertheme.rasi"
+
+if [[ ! -f "$power_theme_config" ]]; then
+    log_error "Missing power theme config: $power_theme_config"
+    exit 1
+fi
+
 prompt() {
-    echo "fullscreen"
-    echo "small"
+    printf "fullscreen\n"
+    printf "small\n"
 }
 
-rofi_command="rofi -i -dmenu -config $theme"
+selected_style=$(prompt | rofi -i -dmenu -config "$power_theme_config")
 
-# Present the list of styles using Rofi and get the selected style
-selected_style=$(prompt | ${rofi_command})
-
-if [ -n "$selected_style" ]; then
-    sed -i "s|^theme=.*|theme='${selected_style%.rasi}'|" "$menu_select_script"
+if [[ -n "${selected_style:-}" ]]; then
+    update_config_value "POWERMENU_THEME_NAME" "${selected_style%.rasi}"
     notify-send -t 3000 "Power menu" "Theme applied: ${selected_style}"
 fi
