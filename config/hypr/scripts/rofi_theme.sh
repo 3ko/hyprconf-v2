@@ -1,52 +1,81 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
 
-rofiConf="$HOME/.config/rofi/themes/rofi-wall-2.rasi"
-rofiStyleDir="$HOME/.config/rofi/menu"
-rofiAssetDir="$HOME/.config/rofi/assets"
-menu_select_script="$HOME/.config/hypr/scripts/menu.sh"
+# Environment: ROFI_THEME_DIR, ROFI_MENU_DIR, ROFI_ASSET_DIR, MENU_THEME_NAME (from theme.conf)
+# Dependencies: rofi, hyprctl, jq, notify-send
 
-# Set rofi scaling
-[[ "${rofiScale}" =~ ^[0-9]+$ ]] || rofiScale=10
-r_scale="configuration {font: \"JetBrainsMono Nerd Font ${rofiScale}\";}"
+source "$HOME/.config/hypr/scripts/theme.sh"
+ensure_config_loaded || exit 1
+require_commands rofi hyprctl jq notify-send || exit 1
+
+ROFI_THEME_SELECTOR="$ROFI_THEME_DIR/rofi-wall-2.rasi"
+ROFI_STYLE_DIR="$ROFI_MENU_DIR"
+ROFI_ASSETS_DIR="${ROFI_ASSET_DIR:-$ROFI_BASE_DIR/assets}"
+
+mkdir -p "$ROFI_ASSETS_DIR"
+
+if [[ ! -f "$ROFI_THEME_SELECTOR" ]]; then
+    log_error "Missing rofi selector theme: $ROFI_THEME_SELECTOR"
+    exit 1
+fi
+
+style_files=("$ROFI_ASSETS_DIR"/*.png)
+if ((${#style_files[@]} == 0)); then
+    log_error "No rofi theme assets found in $ROFI_ASSETS_DIR"
+    exit 1
+fi
+
+# Scale controls
+rofi_scale=${rofiScale:-10}
+[[ "$rofi_scale" =~ ^[0-9]+$ ]] || rofi_scale=10
+hypr_border=${hypr_border:-2}
+[[ "$hypr_border" =~ ^[0-9]+$ ]] || hypr_border=2
+
+read -r mon_x_res mon_scale < <(hyprctl -j monitors | jq -r '.[] | select(.focused==true) | "\(.width) \(.scale)"')
+if [[ -z "${mon_x_res:-}" || -z "${mon_scale:-}" ]]; then
+    log_error "Unable to read monitor info from hyprctl"
+    exit 1
+fi
+
+mon_scale=${mon_scale/./}
+mon_x_res=$(( mon_x_res * 100 / mon_scale ))
+
 elem_border=$(( hypr_border * 5 ))
 icon_border=$(( elem_border - 5 ))
 
-# Scale for monitor
-mon_x_res=$(hyprctl -j monitors | jq '.[] | select(.focused==true) | .width')
-mon_scale=$(hyprctl -j monitors | jq '.[] | select(.focused==true) | .scale' | sed "s/\.//")
-mon_x_res=$(( mon_x_res * 100 / mon_scale ))
-
-# Generate config
-elm_width=$(( (20 + 12 + 16 ) * rofiScale ))
-max_avail=$(( mon_x_res - (4 * rofiScale) ))
+elm_width=$(( (20 + 12 + 16) * rofi_scale ))
+max_avail=$(( mon_x_res - (4 * rofi_scale) ))
 col_count=$(( max_avail / elm_width ))
-[[ "${col_count}" -gt 5 ]] && col_count=5
+(( col_count < 1 )) && col_count=1
+(( col_count > 5 )) && col_count=5
+
+r_scale="configuration {font: \"JetBrainsMono Nerd Font ${rofi_scale}\";}"
 r_override="window{width:100%;} listview{columns:${col_count};} element{orientation:vertical;border-radius:${elem_border}px;} element-icon{border-radius:${icon_border}px;size:20em;} element-text{enabled:false;}"
 
-# List available styles and present in rofi menu with icons
-style_files=($(ls "$rofiAssetDir"/*.png))
+menu_entries() {
+    local style_path style_name
+    for style_path in "${style_files[@]}"; do
+        style_name=$(basename "$style_path")
+        printf "%s\x00icon\x1f%s\n" "$style_name" "$style_path"
+    done
+}
 
-# Extract only the file names for display
-style_names=("${style_files[@]##*/}")
+selected_style=$(menu_entries | rofi -dmenu -markup-rows -theme-str "$r_override" -theme-str "$r_scale" -config "$ROFI_THEME_SELECTOR" -p "Select Rofi theme")
 
-# Prepare the list for rofi with icons
-rofi_list=""
-for style_name in "${style_names[@]}"; do
-    style_num=$(echo "$style_name" | awk -F '-' '{print $2}' | awk -F '.' '{print $1}')
-    rofi_list+="${style_name}\x00icon\x1f${rofiAssetDir}/${style_name}\n"
-done
-
-# Present the list of styles using rofi and get the selected style
-selected_style=$(echo -e "$rofi_list" | rofi -dmenu -markup-rows -theme-str "$r_override" -config "$rofiConf" -p "Select Rofi theme")
-echo "selected style: $selected_style"
-
-# If a selection was made, apply the new style
-if [ -n "$selected_style" ]; then
-    selected_style_number=$(echo "$selected_style" | awk -F '-' '{print $2}' | awk -F '.' '{print $1}')
-    selected_style_path=$(ls ${rofiStyleDir}/style-${selected_style_number}.rasi)
-
-    notify-send -t 2000 -i "$HOME/.config/rofi/assets/style-${selected_style_number}.png" "Theme applied"
-
-    # Update the menu_select.sh script with the selected theme
-    sed -i "s|^theme=.*|theme='style-${selected_style_number}'|" "$menu_select_script"
+if [[ -z "${selected_style:-}" ]]; then
+    exit 0
 fi
+
+selected_style_base="${selected_style%%.*}"
+selected_style_number="${selected_style_base#style-}"
+selected_theme="style-${selected_style_number}"
+selected_theme_file="$ROFI_STYLE_DIR/${selected_theme}.rasi"
+
+if [[ ! -f "$selected_theme_file" ]]; then
+    log_error "Missing rofi theme file: $selected_theme_file"
+    exit 1
+fi
+
+update_config_value "MENU_THEME_NAME" "$selected_theme"
+notify-send -t 2000 -i "$ROFI_ASSETS_DIR/${selected_style_base}.png" "Theme applied" "$selected_theme"

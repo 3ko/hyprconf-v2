@@ -1,89 +1,101 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-scriDir="$HOME/.config/hypr/scripts"
-cache_dir="$HOME/.config/hypr/.cache"
-wallCache="$cache_dir/.wallpaper"
-theme=$(cat "$HOME/.config/hypr/.cache/.theme")
-wallDIR="$HOME/.config/hypr/Wallpapers/${theme}"
+# Environment: WALLPAPER_DIR, WALLPAPER_CACHE_FILE, WALLPAPER_LINK_TARGET, ROFI_THEME_DIR (from theme.conf)
+# Dependencies: rofi, swww, notify-send
 
-[[ ! -f "$wallCache" ]] && touch "$wallCache"
+source "$HOME/.config/hypr/scripts/theme.sh"
+ensure_config_loaded || exit 1
+require_commands rofi swww notify-send || exit 1
 
-# Transition config
-FPS=60
-TYPE="random"
-DURATION=1
-BEZIER=".43,1.19,1,.4"
-SWWW_PARAMS="--transition-fps $FPS --transition-type $TYPE --transition-duration $DURATION"
+THEME_NAME=$(current_theme_name)
+CACHE_DIR="${CURRENT_THEME_CACHE%/*}"
+WALLPAPER_CACHE="$WALLPAPER_CACHE_FILE"
+WALLPAPER_THEME_DIR="$WALLPAPER_DIR/${THEME_NAME}"
 
-
-# Retrieve image files
-PICS=($(ls "${wallDIR}" | grep -E ".jpg$|.jpeg$|.png$|.gif$"))
-RANDOM_PIC="${PICS[$((RANDOM % ${#PICS[@]}))]}"
-RANDOM_PIC_NAME="${#PICS[@]}. random"
-
-# Rofi command ( style )
-rofi_command1="rofi -show -dmenu -config ~/.config/rofi/themes/rofi-wall.rasi"
-rofi_command2="rofi -show -dmenu -config ~/.config/rofi/themes/rofi-wall-2.rasi"
-
-menu() {
-  for i in "${!PICS[@]}"; do
-    # Displaying .gif to indicate animated images
-    if [[ -z $(echo "${PICS[$i]}" | grep .gif$) ]]; then
-      printf "$(echo "${PICS[$i]}" | cut -d. -f1)\x00icon\x1f${wallDIR}/${PICS[$i]}\n"
-    else
-      printf "${PICS[$i]}\n"
-    fi
-  done
-
-  printf "$RANDOM_PIC_NAME\n"
+[[ -d "$WALLPAPER_THEME_DIR" ]] || {
+    log_error "Missing wallpaper directory: $WALLPAPER_THEME_DIR"
+    exit 1
 }
 
-case $1 in
-    thm1)
-        choice=$(menu | ${rofi_command1})
-        ;;
-    thm2)
-        choice=$(menu | ${rofi_command2})
-        ;;
-esac
+[[ ! -f "$WALLPAPER_CACHE" ]] && touch "$WALLPAPER_CACHE"
 
-swww-daemon &
+TRANSITION_FPS=60
+TRANSITION_TYPE="random"
+TRANSITION_DURATION=1
+TRANSITION_BEZIER=".43,1.19,1,.4"
+SWWW_PARAMS=("--transition-fps" "$TRANSITION_FPS" "--transition-type" "$TRANSITION_TYPE" "--transition-duration" "$TRANSITION_DURATION")
 
-# No choice case
-if [[ -z $choice ]]; then
-  exit 0
-fi
+ROFI_WALL_CONFIG="$ROFI_THEME_DIR/rofi-wall.rasi"
+ROFI_WALL_ALT_CONFIG="$ROFI_THEME_DIR/rofi-wall-2.rasi"
 
-# Random choice case
-if [ "$choice" = "$RANDOM_PIC_NAME" ]; then
-  swww img "${wallDIR}/${RANDOM_PIC}" $SWWW_PARAMS
-  exit 0
-fi
-
-# Find the index of the selected file
-pic_index=-1
-for i in "${!PICS[@]}"; do
-  filename=$(basename "${PICS[$i]}")
-  if [[ "$filename" == "$choice"* ]]; then
-    pic_index=$i
-    break
-  fi
-done
-
-if [[ $pic_index -ne -1 ]]; then
-    notify-send -i "${wallDIR}/${PICS[$pic_index]}" "Changing wallpaper" -t 1500
-    swww img "${wallDIR}/${PICS[$pic_index]}" $SWWW_PARAMS
-
-    ln -sf "${wallDIR}/${PICS[$pic_index]}" "$cache_dir/current_wallpaper.png"
-    basename="$(basename "${wallDIR}/${PICS[$pic_index]}")"
-    wallName="${basename%.*}"
-    echo "$wallName" > "$wallCache"
-
-else
-    echo "Image not found."
+if [[ ! -f "$ROFI_WALL_CONFIG" || ! -f "$ROFI_WALL_ALT_CONFIG" ]]; then
+    log_error "Missing wallpaper selector themes in $ROFI_THEME_DIR"
     exit 1
 fi
 
+mapfile -t WALLPAPERS < <(find "$WALLPAPER_THEME_DIR" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' \) | sort)
+if ((${#WALLPAPERS[@]} == 0)); then
+    log_error "No wallpapers found for theme ${THEME_NAME}"
+    exit 1
+fi
+
+RANDOM_WALLPAPER="${WALLPAPERS[$((RANDOM % ${#WALLPAPERS[@]}))]}"
+RANDOM_LABEL="${#WALLPAPERS[@]}. random"
+
+menu() {
+    local file
+    for file in "${WALLPAPERS[@]}"; do
+        local name
+        name=$(basename "$file")
+        name="${name%.*}"
+        if [[ "$file" != *.gif ]]; then
+            printf "%s\x00icon\x1f%s\n" "$name" "$file"
+        else
+            printf "%s\n" "$name"
+        fi
+    done
+    printf "%s\n" "$RANDOM_LABEL"
+}
+
+case ${1:-thm1} in
+    thm2)
+        choice=$(menu | rofi -show -dmenu -config "$ROFI_WALL_ALT_CONFIG")
+        ;;
+    *)
+        choice=$(menu | rofi -show -dmenu -config "$ROFI_WALL_CONFIG")
+        ;;
+esac
+
+swww-daemon &>/dev/null || true
+
+[[ -z "${choice:-}" ]] && exit 0
+
+if [[ "$choice" == "$RANDOM_LABEL" ]]; then
+    swww img "$RANDOM_WALLPAPER" "${SWWW_PARAMS[@]}"
+    exit 0
+fi
+
+selected_path=""
+for file in "${WALLPAPERS[@]}"; do
+    if [[ "$(basename "$file")" == "$choice"* ]]; then
+        selected_path="$file"
+        break
+    fi
+done
+
+if [[ -z "$selected_path" ]]; then
+    log_error "Image not found."
+    exit 1
+fi
+
+notify-send -i "$selected_path" "Changing wallpaper" -t 1500
+swww img "$selected_path" "${SWWW_PARAMS[@]}"
+
+ln -sf "$selected_path" "$WALLPAPER_LINK_TARGET"
+wall_name="${choice%.*}"
+echo "$wall_name" >"$WALLPAPER_CACHE"
+
 sleep 0.5
-"$scriDir/wallcache.sh"
-"$scriDir/themes.sh"
+"$HYPR_SCRIPTS_DIR/wallcache.sh"
+"$HYPR_SCRIPTS_DIR/themes.sh" 2>/dev/null || true
